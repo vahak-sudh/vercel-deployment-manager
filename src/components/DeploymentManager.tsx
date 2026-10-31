@@ -725,8 +725,9 @@ export function DeploymentManager() {
               >
                 vercel.com/account/tokens
               </Typography>
-              . Token is stored in an httpOnly cookie and used only by server
-              routes. Filter by team/project and auto-refresh while builds run.
+              . Token is stored in this browser (localStorage) and sent only to
+              api.vercel.com. Filter by team/project and auto-refresh while builds
+              run.
             </Typography>
           </Paper>
         )}
