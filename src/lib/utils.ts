@@ -3,7 +3,7 @@ import type { CommitGroup, Deployment, RedeployGitInfo } from "./types";
 export const PAGE_SIZE = 20;
 export const MAX_DOTS = 8;
 
-/** Common branches offered as one-click deploy targets. */
+/** Common branches shown in the branch filter. */
 export const QUICK_BRANCHES = ["master", "main", "dev", "staging"] as const;
 
 export function timeAgo(ms?: number): string {
@@ -103,13 +103,16 @@ export function filterDeployments(
   deployments: Deployment[],
   filter: string,
   search: string,
-  project?: string
+  project?: string,
+  branch?: string
 ): Deployment[] {
   const q = search.toLowerCase().trim();
+  const branchQ = branch?.trim().toLowerCase() || "";
   return deployments.filter((d) => {
     const status = deploymentStatus(d);
     const stateOk = filter === "ALL" || status === filter;
     const projectOk = !project || d.name === project;
+    const branchOk = !branchQ || commitBranch(d).toLowerCase() === branchQ;
     const msg = commitMessage(d);
     const searchOk =
       !q ||
@@ -125,7 +128,7 @@ export function filterDeployments(
       ]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
-    return stateOk && projectOk && searchOk;
+    return stateOk && projectOk && branchOk && searchOk;
   });
 }
 
