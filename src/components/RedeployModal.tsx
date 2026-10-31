@@ -18,6 +18,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import type { RedeployTarget } from "@/lib/types";
+import { QUICK_BRANCHES } from "@/lib/utils";
 
 export function RedeploySingleModal({
   project,
@@ -35,7 +36,9 @@ export function RedeploySingleModal({
   const projectBranches = Array.from(seenBranches)
     .filter((s) => s.startsWith(`${project}:::`))
     .map((s) => s.split(":::")[1]);
-  const branches = [...new Set([branch, ...projectBranches])];
+  const branches = [
+    ...new Set([...QUICK_BRANCHES, branch, ...projectBranches]),
+  ];
   const [selected, setSelected] = useState(branch);
   const [custom, setCustom] = useState(branch);
 
@@ -56,7 +59,7 @@ export function RedeploySingleModal({
           sx={{ mb: 2 }}
         />
         <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-          Branch — recently deployed
+          Branch — quick picks & recently deployed
         </Typography>
         <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1, mb: 1.5 }}>
           {branches.map((b) => (

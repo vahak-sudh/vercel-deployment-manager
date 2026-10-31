@@ -3,6 +3,9 @@ import type { CommitGroup, Deployment, RedeployGitInfo } from "./types";
 export const PAGE_SIZE = 20;
 export const MAX_DOTS = 8;
 
+/** Common branches offered as one-click deploy targets. */
+export const QUICK_BRANCHES = ["master", "main", "dev", "staging"] as const;
+
 export function timeAgo(ms?: number): string {
   if (!ms) return "—";
   const diff = Date.now() - ms;

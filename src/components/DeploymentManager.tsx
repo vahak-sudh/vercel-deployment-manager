@@ -16,6 +16,7 @@ import CardHeader from "@mui/material/CardHeader";
 import Chip from "@mui/material/Chip";
 import CircularProgress from "@mui/material/CircularProgress";
 import Container from "@mui/material/Container";
+import Divider from "@mui/material/Divider";
 import FormControl from "@mui/material/FormControl";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
@@ -68,6 +69,7 @@ import {
 import {
   MAX_DOTS,
   PAGE_SIZE,
+  QUICK_BRANCHES,
   branchAliasHost,
   collectBranches,
   commitBranch,
@@ -76,6 +78,7 @@ import {
   groupDeployments,
   hrefForHost,
   redeployGitInfo,
+  redeploySourceId,
   timeAgo,
 } from "@/lib/utils";
 import type { RedeployGitInfo } from "@/lib/types";
@@ -125,6 +128,7 @@ export function DeploymentManager() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teamId, setTeamId] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [quickBranch, setQuickBranch] = useState<string>("master");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const bootstrapped = useRef(false);
   const pageCacheRef = useRef(pageCache);
@@ -163,6 +167,22 @@ export function DeploymentManager() {
     () => collectBranches(deployments),
     [deployments]
   );
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) || null,
+    [projects, projectId]
+  );
+
+  const branchOptions = useMemo(() => {
+    const fromSeen = Array.from(seenBranches)
+      .filter((s) => {
+        if (!selectedProject) return true;
+        return s.startsWith(`${selectedProject.name}:::`);
+      })
+      .map((s) => s.split(":::")[1])
+      .filter(Boolean);
+    return [...new Set([...QUICK_BRANCHES, ...fromSeen, quickBranch])];
+  }, [seenBranches, selectedProject, quickBranch]);
 
   const stats = useMemo(() => {
     const count = (s: string) =>
@@ -353,6 +373,38 @@ export function DeploymentManager() {
       showToast(`${ok} deployment${ok > 1 ? "s" : ""} canceled`, "success");
     else if (ok) showToast(`${ok} canceled, ${fail} failed`, "error");
     else showToast("Cancel failed", "error");
+  }
+
+  function findProjectSource(project: Project): Deployment | undefined {
+    const all = Object.values(pageCacheRef.current).flatMap(
+      (p) => p.deployments
+    );
+    return (
+      all.find((d) => d.projectId === project.id) ||
+      all.find((d) => d.name === project.name)
+    );
+  }
+
+  async function deploySelectedBranch() {
+    if (!selectedProject) {
+      showToast("Select a project first", "error");
+      return;
+    }
+    const branch = quickBranch.trim();
+    if (!branch) {
+      showToast("Pick a branch to deploy", "error");
+      return;
+    }
+    const source = findProjectSource(selectedProject);
+    const git: RedeployGitInfo = source
+      ? { ...redeployGitInfo(source), projectId: selectedProject.id }
+      : { type: "github", projectId: selectedProject.id };
+    await doRedeploy(
+      source ? redeploySourceId(source) : selectedProject.id,
+      selectedProject.name,
+      branch,
+      git
+    );
   }
 
   async function doRedeploy(
@@ -616,6 +668,50 @@ export function DeploymentManager() {
                   ))}
                 </Select>
               </FormControl>
+
+              <FormControl size="small" sx={{ flex: "0 0 auto", minWidth: 110 }}>
+                <Select
+                  displayEmpty
+                  value={quickBranch}
+                  onChange={(e) => setQuickBranch(String(e.target.value))}
+                  sx={{ height: 28, fontSize: 12 }}
+                  renderValue={(v) => (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                      <AccountTreeOutlinedIcon sx={{ fontSize: 14 }} />
+                      {v || "Branch"}
+                    </Box>
+                  )}
+                >
+                  <MenuItem disabled value="">
+                    Quick branches
+                  </MenuItem>
+                  {QUICK_BRANCHES.map((b) => (
+                    <MenuItem key={`q-${b}`} value={b}>
+                      {b}
+                    </MenuItem>
+                  ))}
+                  {branchOptions.filter((b) => !(QUICK_BRANCHES as readonly string[]).includes(b))
+                    .length > 0 && <Divider />}
+                  {branchOptions
+                    .filter((b) => !(QUICK_BRANCHES as readonly string[]).includes(b))
+                    .map((b) => (
+                      <MenuItem key={`s-${b}`} value={b}>
+                        {b}
+                      </MenuItem>
+                    ))}
+                </Select>
+              </FormControl>
+
+              <Button
+                size="small"
+                variant="contained"
+                disabled={!projectId || !quickBranch.trim()}
+                onClick={() => void deploySelectedBranch()}
+                startIcon={<ReplayIcon sx={{ fontSize: 14 }} />}
+                sx={{ flex: "0 0 auto", height: 28, px: 1.25, fontSize: 11 }}
+              >
+                Deploy
+              </Button>
 
               <TextField
                 size="small"
