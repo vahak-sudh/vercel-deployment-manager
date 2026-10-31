@@ -53,6 +53,19 @@ import type {
   Team,
 } from "@/lib/types";
 import {
+  cancelDeployment,
+  fetchDeployments,
+  fetchProjects,
+  fetchTeams,
+  probeToken,
+  redeploy,
+} from "@/lib/vercel-client";
+import {
+  clearStoredToken,
+  getStoredToken,
+  setStoredToken,
+} from "@/lib/token";
+import {
   MAX_DOTS,
   PAGE_SIZE,
   branchAliasHost,
@@ -164,33 +177,18 @@ export function DeploymentManager() {
 
   const loadMeta = useCallback(async (nextTeamId = "") => {
     try {
-      const [teamsRes, projectsRes] = await Promise.all([
-        fetch("/api/teams"),
-        fetch(
-          `/api/projects${nextTeamId ? `?teamId=${encodeURIComponent(nextTeamId)}` : ""}`
-        ),
+      const [nextTeams, nextProjects] = await Promise.all([
+        fetchTeams(),
+        fetchProjects(nextTeamId || undefined),
       ]);
-      if (teamsRes.ok) {
-        const data = await teamsRes.json();
-        const nextTeams: Team[] = data.teams || [];
-        setTeams(nextTeams);
-        // Auto-select sole team (e.g. vahak-web) so redeploys get the right scope
-        if (!nextTeamId && !teamIdRef.current && nextTeams.length === 1) {
-          setTeamId(nextTeams[0].id);
-          const scoped = await fetch(
-            `/api/projects?teamId=${encodeURIComponent(nextTeams[0].id)}`
-          );
-          if (scoped.ok) {
-            const pdata = await scoped.json();
-            setProjects(pdata.projects || []);
-            return;
-          }
-        }
+      setTeams(nextTeams);
+      // Auto-select sole team (e.g. vahak-web) so redeploys get the right scope
+      if (!nextTeamId && !teamIdRef.current && nextTeams.length === 1) {
+        setTeamId(nextTeams[0].id);
+        setProjects(await fetchProjects(nextTeams[0].id));
+        return;
       }
-      if (projectsRes.ok) {
-        const data = await projectsRes.json();
-        setProjects(data.projects || []);
-      }
+      setProjects(nextProjects);
     } catch {
       /* non-fatal */
     }
@@ -220,16 +218,12 @@ export function DeploymentManager() {
         const needsFetch = opts?.reset || opts?.refresh || !cache[n];
 
         if (needsFetch) {
-          const qs = new URLSearchParams({ limit: String(PAGE_SIZE) });
-          if (n > 1 && cache[n - 1]?.nextCursor) {
-            qs.set("until", String(cache[n - 1].nextCursor));
-          }
-          if (useTeam) qs.set("teamId", useTeam);
-          if (useProject) qs.set("projectId", useProject);
-
-          const res = await fetch(`/api/deployments?${qs}`);
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+          const data = await fetchDeployments({
+            limit: PAGE_SIZE,
+            until: n > 1 ? cache[n - 1]?.nextCursor : undefined,
+            teamId: useTeam || undefined,
+            projectId: useProject || undefined,
+          });
 
           const list: Deployment[] = data.deployments || [];
           const nextCursor = data.pagination?.next ?? null;
@@ -269,16 +263,13 @@ export function DeploymentManager() {
     }
 
     if (token) {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showToast(data.error || "Invalid token", "error");
+      try {
+        await probeToken(token);
+      } catch (e) {
+        showToast(e instanceof Error ? e.message : "Invalid token", "error");
         return;
       }
+      setStoredToken(token);
       setAuthenticated(true);
       setTokenInput("");
     }
@@ -288,7 +279,7 @@ export function DeploymentManager() {
   }
 
   async function clearToken() {
-    await fetch("/api/auth", { method: "DELETE" });
+    clearStoredToken();
     setAuthenticated(false);
     setTokenInput("");
     setPageCache({});
@@ -318,11 +309,7 @@ export function DeploymentManager() {
 
     const results = await Promise.allSettled(
       uids.map(async (uid) => {
-        const res = await fetch(`/api/deployments/${uid}/cancel`, {
-          method: "PATCH",
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        await cancelDeployment(uid);
         return uid;
       })
     );
@@ -377,24 +364,18 @@ export function DeploymentManager() {
     setRedeployDialog(null);
     setActionState((prev) => ({ ...prev, [uid]: "deploying" }));
     try {
-      const res = await fetch("/api/redeploy", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: project,
-          branch,
-          originalBranch: git?.originalBranch,
-          deploymentId: git?.redeployFromId || uid,
-          projectId: git?.projectId,
-          teamId: teamId || undefined,
-          gitType: git?.type,
-          repoId: git?.repoId,
-          org: git?.org,
-          repo: git?.repo,
-        }),
+      await redeploy({
+        name: project,
+        branch,
+        originalBranch: git?.originalBranch,
+        deploymentId: git?.redeployFromId || uid,
+        projectId: git?.projectId,
+        teamId: teamId || undefined,
+        gitType: git?.type,
+        repoId: git?.repoId,
+        org: git?.org,
+        repo: git?.repo,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setActionState((prev) => ({ ...prev, [uid]: "deployed" }));
       showToast(`${project} on ${branch} queued for deployment`, "success");
     } catch (e) {
@@ -415,9 +396,7 @@ export function DeploymentManager() {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
     (async () => {
-      const res = await fetch("/api/auth");
-      const data = await res.json();
-      if (data.authenticated) {
+      if (getStoredToken()) {
         setAuthenticated(true);
         await loadMeta("");
         await fetchPage(1, { reset: true });
